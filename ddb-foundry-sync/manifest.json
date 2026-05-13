@@ -1,0 +1,42 @@
+{
+  "manifest_version": 3,
+  "name": "DDB Foundry Sync",
+  "version": "0.2.0",
+  "description": "Syncs D&D Beyond characters to Foundry VTT in real-time",
+
+  "permissions": [
+    "storage",
+    "webRequest",
+    "activeTab",
+    "scripting",
+    "tabs"
+  ],
+
+  "host_permissions": [
+    "*://*.dndbeyond.com/*",
+    "*://character-service.dndbeyond.com/*",
+    "<all_urls>"
+  ],
+
+  "background": {
+    "service_worker": "background.js"
+  },
+
+  "content_scripts": [
+    {
+      "matches": ["*://www.dndbeyond.com/characters/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["*://www.dndbeyond.com/monsters/*"],
+      "js": ["content-monster.js"],
+      "run_at": "document_idle"
+    }
+  ],
+
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "DDB Foundry Sync"
+  }
+}

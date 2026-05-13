@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>DDB Foundry Sync</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      width: 290px;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      font-size: 13px;
+      background: #1a1a2e;
+      color: #e0e0e0;
+    }
+
+    .header {
+      background: #c41e3a;
+      padding: 10px 14px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .header h1 { font-size: 14px; font-weight: 600; color: #fff; }
+    .header .icon { font-size: 18px; }
+
+    .body { padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; }
+
+    .card {
+      background: #16213e;
+      border: 1px solid #2a2a4a;
+      border-radius: 6px;
+      padding: 10px 12px;
+    }
+    .card label {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: #888;
+      display: block;
+      margin-bottom: 4px;
+    }
+    .card .value { font-size: 13px; color: #e0e0e0; font-weight: 500; }
+
+    /* Link status card */
+    .link-card {
+      background: #16213e;
+      border: 1px solid #2a2a4a;
+      border-radius: 6px;
+      padding: 10px 12px;
+    }
+    .link-card label {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: #888;
+      display: block;
+      margin-bottom: 6px;
+    }
+    .link-status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+    .status-dot {
+      width: 9px; height: 9px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      background: #555;
+    }
+    .status-dot.linked   { background: #4caf50; box-shadow: 0 0 5px #4caf5066; }
+    .status-dot.unlinked { background: #ff9800; box-shadow: 0 0 5px #ff980066; }
+    .status-dot.error    { background: #f44336; }
+
+    .link-text { font-size: 12px; color: #ccc; }
+    .actor-id  { font-size: 10px; color: #666; font-family: monospace; margin-top: 2px; }
+
+    /* Create button */
+    .btn-create {
+      width: 100%;
+      padding: 9px 12px;
+      background: #c41e3a;
+      color: #fff;
+      border: none;
+      border-radius: 5px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      transition: background 0.15s;
+    }
+    .btn-create:hover   { background: #a01830; }
+    .btn-create:active  { background: #801225; }
+    .btn-create:disabled {
+      background: #444;
+      color: #888;
+      cursor: not-allowed;
+    }
+    .btn-create .spinner {
+      width: 13px; height: 13px;
+      border: 2px solid #ffffff44;
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      display: none;
+    }
+    .btn-create.loading .spinner { display: block; }
+    .btn-create.loading .btn-label { opacity: 0.7; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Unlink button */
+    .btn-unlink {
+      width: 100%;
+      padding: 6px 12px;
+      background: transparent;
+      color: #666;
+      border: 1px solid #333;
+      border-radius: 5px;
+      font-size: 11px;
+      cursor: pointer;
+      transition: color 0.15s, border-color 0.15s;
+    }
+    .btn-unlink:hover { color: #f44336; border-color: #f44336; }
+
+    /* Result message */
+    .result {
+      font-size: 11px;
+      padding: 7px 10px;
+      border-radius: 5px;
+      display: none;
+    }
+    .result.success { background: #1b3a1f; color: #81c784; border: 1px solid #2e5c33; }
+    .result.error   { background: #3a1b1b; color: #e57373; border: 1px solid #5c2e2e; }
+
+    .footer {
+      padding: 8px 14px;
+      border-top: 1px solid #1e1e3a;
+      font-size: 10px;
+      color: #444;
+      text-align: center;
+    }
+
+    /* Settings panel */
+    .settings-toggle {
+      background: none; border: none; color: #555; font-size: 16px;
+      cursor: pointer; padding: 0; line-height: 1;
+      transition: color 0.15s;
+    }
+    .settings-toggle:hover { color: #aaa; }
+
+    .settings-card {
+      background: #16213e;
+      border: 1px solid #2a2a4a;
+      border-radius: 6px;
+      padding: 10px 12px;
+      display: none;
+    }
+    .settings-card.visible { display: block; }
+    .settings-card label {
+      font-size: 10px; text-transform: uppercase;
+      letter-spacing: 0.8px; color: #888;
+      display: block; margin-bottom: 5px;
+    }
+    .settings-row { display: flex; gap: 6px; align-items: center; }
+    .settings-input {
+      flex: 1; background: #0f0f20; border: 1px solid #333;
+      border-radius: 4px; color: #e0e0e0; font-size: 12px;
+      padding: 6px 8px; font-family: monospace;
+    }
+    .settings-input:focus { outline: none; border-color: #c41e3a; }
+    .btn-save {
+      padding: 6px 10px; background: #c41e3a; color: #fff;
+      border: none; border-radius: 4px; font-size: 11px;
+      font-weight: 700; cursor: pointer; white-space: nowrap;
+    }
+    .btn-save:hover { background: #a01830; }
+    .api-status {
+      font-size: 10px; margin-top: 5px;
+    }
+    .api-status.ok  { color: #4caf50; }
+    .api-status.err { color: #e57373; }
+    .api-status.none { color: #888; }
+
+    /* Warn banner when no API key */
+    .warn-banner {
+      background: #2a1a00; border: 1px solid #5c3a00;
+      border-radius: 5px; padding: 8px 10px;
+      font-size: 11px; color: #ffb74d;
+      display: none;
+    }
+    .warn-banner.visible { display: block; }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <span class="icon">⚔️</span>
+    <h1>DDB Foundry Sync</h1>
+  </div>
+
+  <div class="body">
+
+    <!-- Character info -->
+    <div class="card">
+      <label>Character</label>
+      <div class="value" id="characterName">—</div>
+      <div class="actor-id" id="characterId"></div>
+    </div>
+
+    <!-- Link status -->
+    <div class="link-card">
+      <label>Foundry Actor</label>
+      <div class="link-status">
+        <div class="status-dot" id="linkDot"></div>
+        <div>
+          <div class="link-text" id="linkText">Waiting for character page…</div>
+          <div class="actor-id"  id="actorId"></div>
+        </div>
+      </div>
+
+      <!-- Shown when NOT linked -->
+      <div id="createSection">
+        <button class="btn-create" id="btnCreate" disabled>
+          <div class="spinner"></div>
+          <span class="btn-label">✦ Create Actor in Foundry</span>
+        </button>
+        <div class="result" id="createResult"></div>
+      </div>
+
+      <!-- Shown when linked -->
+      <div id="linkedSection" style="display:none">
+        <button class="btn-create" id="btnReimport" style="margin-bottom:6px">
+          <div class="spinner"></div>
+          <span class="btn-label">↺ Re-import from DDB</span>
+        </button>
+        <div class="result" id="reimportResult"></div>
+        <button class="btn-unlink" id="btnUnlink">Unlink actor</button>
+      </div>
+    </div>
+
+    <!-- Last sync -->
+    <div class="card">
+      <label>Last HP Sync</label>
+      <div class="value" id="lastSync">—</div>
+    </div>
+
+  </div>
+
+  <div class="footer">Keep your Foundry tab open in Chrome while playing</div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

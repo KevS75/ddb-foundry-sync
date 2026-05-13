@@ -1,0 +1,53 @@
+name: Release
+
+# Triggered when you push a version tag, e.g. git tag v0.2.0 && git push --tags
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Zip the Foundry module folder (what Foundry downloads on install)
+      - name: Zip Foundry module
+        run: |
+          cd ddb-sync
+          zip -r ../ddb-sync.zip .
+          cd ..
+
+      # Zip the Chrome extension folder (what players download and load unpacked)
+      - name: Zip Chrome extension
+        run: |
+          cd ddb-foundry-sync
+          zip -r ../ddb-foundry-sync.zip . --exclude "*.md"
+          cd ..
+
+      # Create a GitHub Release and attach both zips
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "DDB Foundry Sync ${{ github.ref_name }}"
+          body: |
+            ## Installation
+
+            **Foundry module** — paste this URL into Foundry → Add-on Modules → Install Module:
+            ```
+            https://raw.githubusercontent.com/KevS75/ddb-foundry-sync/main/ddb-sync/module.json
+            ```
+
+            **Chrome extension** — download `ddb-foundry-sync.zip`, unzip, then load unpacked in `chrome://extensions`.
+
+            See the [README](https://github.com/KevS75/ddb-foundry-sync#readme) for full setup instructions.
+          files: |
+            ddb-sync.zip
+            ddb-foundry-sync.zip
+          draft: false
+          prerelease: false
