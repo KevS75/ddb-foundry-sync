@@ -347,13 +347,90 @@ async function readStatsFromDDBTab(characterId) {
 }
 
 // ----------------------------------------------------------
+// Monster actor builder — helpers
+// ----------------------------------------------------------
+
+// Convert "21 (6d6)" and "13 (2d8 + 4)" patterns to Foundry inline rolls.
+// Keeps the average value visible and makes the dice formula clickable.
+function convertDiceToInlineRolls(text) {
+  if (!text) return '';
+  return text.replace(
+    /(\d+) \((\d+d\d+(?:\s*[+\-]\s*\d+)?)\)/g,
+    (_, avg, formula) => `${avg} ([[/roll ${formula.replace(/\s+/g, '')}]])`
+  );
+}
+
+function formatCR(cr) {
+  if (cr === 0.125) return '1/8';
+  if (cr === 0.25)  return '1/4';
+  if (cr === 0.5)   return '1/2';
+  return String(cr ?? 0);
+}
+
+// Token grid size by creature size category
+function tokenSizeForCreature(size) {
+  const map = { tiny: 0.5, sm: 1, med: 1, lg: 2, huge: 3, grg: 4 };
+  return map[size] ?? 1;
+}
+
+// Build the NPC biography as Foundry-enriched HTML.
+// All traits, actions, reactions and legendary actions are written as
+// formatted paragraphs with clickable [[/roll]] inline dice buttons.
+// This avoids needing to create individual Item entries for abilities.
+function buildMonsterBiography(monster) {
+  const parts = [];
+
+  // Summary info line
+  const info = [];
+  if (monster.cr !== undefined) info.push(`<strong>CR:</strong> ${formatCR(monster.cr)}`);
+  if (monster.skills)           info.push(`<strong>Skills:</strong> ${monster.skills}`);
+  if (monster.languages)        info.push(`<strong>Languages:</strong> ${monster.languages}`);
+  if (info.length) parts.push(`<p><em>${info.join(' &nbsp;|&nbsp; ')}</em></p>`);
+
+  function renderSection(label, list) {
+    if (!list?.length) return '';
+    let html = `<h3>${label}</h3>`;
+    for (const { name, desc } of list) {
+      const converted = convertDiceToInlineRolls(desc);
+      html += name
+        ? `<p><strong>${name}.</strong> ${converted}</p>`
+        : `<p>${converted}</p>`;
+    }
+    return html;
+  }
+
+  parts.push(renderSection('Traits',            monster.traits));
+  parts.push(renderSection('Actions',           monster.actions));
+  parts.push(renderSection('Bonus Actions',     monster.bonusActions));
+  parts.push(renderSection('Reactions',         monster.reactions));
+  parts.push(renderSection('Legendary Actions', monster.legendaryActions));
+  parts.push(renderSection('Lair Actions',      monster.lairActions));
+
+  return parts.filter(Boolean).join('\n');
+}
+
+// ----------------------------------------------------------
 // Monster actor builder
 // ----------------------------------------------------------
 function buildMonsterActor(monster) {
+  const ABILITY_KEYS = ['str', 'dex', 'con', 'int', 'wis', 'cha'];
+
+  // Build abilities object with save proficiency flags
+  const abilities = {};
+  ABILITY_KEYS.forEach(key => {
+    abilities[key] = {
+      value:      monster.abilities?.[key] ?? 10,
+      proficient: monster.saves?.[key]     ?? 0
+    };
+  });
+
+  const biographyValue = buildMonsterBiography(monster);
+  const tokenSize      = tokenSizeForCreature(monster.size);
+
   return {
     name: monster.name,
     type: 'npc',
-    img:  monster.avatarUrl || '',
+    img:  monster.avatarUrl || 'icons/svg/mystery-man.svg',
     flags: {
       [MODULE_ID]: {
         monsterId:  String(monster.monsterId),
@@ -362,10 +439,44 @@ function buildMonsterActor(monster) {
       }
     },
     system: {
+      abilities,
       attributes: {
-        ac: { flat: monster.ac, calc: 'flat' },
-        hp: { value: monster.hp, max: monster.hp, formula: '' }
+        ac:       { flat: monster.ac ?? 10, calc: 'flat' },
+        hp:       { value: monster.hp ?? 0, max: monster.hp ?? 0, formula: monster.hpFormula ?? '' },
+        movement: monster.speed  ?? { walk: 0, units: 'ft' },
+        senses:   monster.senses ?? { units: 'ft' }
+      },
+      details: {
+        biography: { value: biographyValue, public: '' },
+        alignment: monster.alignment ?? '',
+        cr:        monster.cr        ?? 0,
+        type: {
+          value:   monster.type    ?? 'humanoid',
+          subtype: monster.subtype ?? '',
+          swarm:   '',
+          custom:  ''
+        }
+      },
+      traits: {
+        size: monster.size ?? 'med',
+        di:   monster.di   ?? { value: [], custom: '' },
+        dr:   monster.dr   ?? { value: [], custom: '' },
+        dv:   monster.dv   ?? { value: [], custom: '' },
+        ci:   monster.ci   ?? { value: [], custom: '' },
+        languages: { value: [], custom: monster.languages ?? '' }
       }
+    },
+    prototypeToken: {
+      name:        monster.name,
+      texture:     { src: monster.avatarUrl || 'icons/svg/mystery-man.svg' },
+      actorLink:   false,
+      disposition: -1,    // hostile by default for NPCs
+      displayName: 20,
+      displayBars: 20,
+      bar1:        { attribute: 'attributes.hp' },
+      vision:      false,
+      width:       tokenSize,
+      height:      tokenSize
     }
   };
 }
@@ -460,12 +571,27 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   // ---- Monster import ----
   if (message.type === 'IMPORT_MONSTER') {
     const { monster } = message;
-    chrome.storage.local.get(['importedMonsters']).then(async (s) => {
+    (async () => {
       try {
         await sendToFoundry('ping');
-        const actorData = buildMonsterActor(monster);
 
-        // Check if already imported
+        // Upload portrait to Foundry (mirrors character import flow)
+        let portraitPath = monster.avatarUrl || '';
+        if (monster.avatarUrl?.startsWith('http')) {
+          console.log(`${PREFIX} 🖼️ Fetching monster portrait…`);
+          const dataUrl = await fetchPortraitAsDataUrl(monster.avatarUrl);
+          const uploaded = await uploadPortraitToFoundry(dataUrl, monster.name);
+          if (uploaded) {
+            portraitPath = uploaded;
+            console.log(`${PREFIX} 🖼️ Portrait stored at: ${portraitPath}`);
+          } else {
+            console.warn(`${PREFIX} 🖼️ Portrait upload failed — using external URL as fallback`);
+          }
+        }
+
+        const actorData = buildMonsterActor({ ...monster, avatarUrl: portraitPath });
+
+        // Check if already imported — overwrite if so
         const foundryTabs = await findFoundryTabs();
         if (foundryTabs.length !== 1) throw new Error('Exactly one Foundry tab required for import');
         const { tab } = foundryTabs[0];
@@ -485,7 +611,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         console.error(`${PREFIX} Monster import failed:`, err.message);
         sendResponse({ ok: false, reason: err.message });
       }
-    });
+    })();
     return true;
   }
 
