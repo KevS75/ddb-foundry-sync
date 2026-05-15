@@ -9,5 +9,7 @@
   },
   "esmodules": ["ddb-sync.js"],
   "socket": true,
-  "authors": [{ "name": "Kev" }]
+  "authors": [{ "name": "Kev" }],
+  "manifest": "https://raw.githubusercontent.com/KevS75/ddb-foundry-sync/main/ddb-sync/module.json",
+  "download": "https://github.com/KevS75/ddb-foundry-sync/releases/download/v0.3.0/ddb-sync.zip"
 }
