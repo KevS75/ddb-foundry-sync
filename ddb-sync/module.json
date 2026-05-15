@@ -1,15 +1,21 @@
 {
   "id": "ddb-sync",
   "title": "DDB Foundry Sync",
-  "description": "Receives commands from the DDB Foundry Sync Chrome extension and creates/updates actors in real-time — no relay server required.",
+  "description": "Receives commands from the DDB Foundry Sync Chrome extension and creates/updates actors in real-time - no relay server required.",
   "version": "0.3.0",
   "compatibility": {
     "minimum": "11",
     "verified": "13"
   },
-  "esmodules": ["ddb-sync.js"],
+  "esmodules": [
+    "ddb-sync.js"
+  ],
   "socket": true,
-  "authors": [{ "name": "Kev" }],
+  "authors": [
+    {
+      "name": "Kev"
+    }
+  ],
   "manifest": "https://raw.githubusercontent.com/KevS75/ddb-foundry-sync/main/ddb-sync/module.json",
   "download": "https://github.com/KevS75/ddb-foundry-sync/releases/download/v0.3.0/ddb-sync.zip"
 }
