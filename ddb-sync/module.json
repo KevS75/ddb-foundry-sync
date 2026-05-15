@@ -8,4 +8,6 @@
     "verified": "13"
   },
   "esmodules": ["ddb-sync.js"],
-  "au
+  "socket": true,
+  "authors": [{ "name": "Kev" }]
+}
