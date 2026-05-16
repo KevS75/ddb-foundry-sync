@@ -5,7 +5,7 @@ Format: `MAJOR.MINOR.PATCH` — see [PROJECT-SUMMARY.md](PROJECT-SUMMARY.md) for
 
 ---
 
-## [Unreleased] — 0.3.0
+## [0.3.1] — 2026-05-16
 
 ### Monster Importer — Full Stats & Rich Descriptions
 - **Portrait upload**: monster portrait is now fetched and uploaded to Foundry's `ddb-portraits/` folder (same flow as character import); NPC sheet `img` and token texture both reference the local file
@@ -14,6 +14,7 @@ Format: `MAJOR.MINOR.PATCH` — see [PROJECT-SUMMARY.md](PROJECT-SUMMARY.md) for
 - Token size is now set automatically from creature size (Tiny=0.5, Large=2, Huge=3, Gargantuan=4)
 - NPCs default to hostile disposition (−1) on placed tokens
 - Fixed ability score selector (`ability-block__score`) after live DOM inspection confirmed the correct class name
+- Fixed character caching
 
 ---
 

@@ -19,3 +19,15 @@ dist/
 # Secrets / local config
 .env
 .env.local
+
+# Other projects in this folder that don't belong in this repo
+.claude/
+dnd-companion/
+ddb-sync-test/
+CLAUDE_CODE_*.md
+PROJECT_NOTES.md
+SIDEQUEST_RULES.md
+add-foundry-mcp.ps1
+foundry-mcp-setup.md
+mcp-issue-summary.md
+start-nextjs.cmd

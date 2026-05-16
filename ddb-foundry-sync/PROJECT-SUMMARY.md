@@ -12,7 +12,7 @@ manifest.json        — MV3 config, permissions, content script declarations
 content.js           — Runs on DDB character pages; injects UI button, watches HP
 content-monster.js   — Runs on DDB monster pages; scrapes stats, injects import button
 background.js        — Service worker; tab injection, message routing, actor mapping
-popup.html / popup.js — Extension popup; Foundry URL config, link status, re-import
+popup.html / popup.js — Extension popup; link status, re-import, actor management
 ```
 
 ### Part 2 — Foundry Module (`ddb-sync/`)
@@ -20,7 +20,7 @@ popup.html / popup.js — Extension popup; Foundry URL config, link status, re-i
 module.json          — Foundry module manifest (id: ddb-sync, verified: v13)
 ddb-sync.js          — Listens for window.postMessage from extension; handles all CRUD
 ```
-Module is installed at Molten Hosting via File Manager → `Data/modules/ddb-sync/`.
+Module is distributed via GitHub manifest URL — players install directly from Foundry's module manager.
 
 ---
 
@@ -124,16 +124,14 @@ All messages: `{ source: 'ddb-sync-extension', action, requestId, ...payload }`
 ### Storage Keys (`chrome.storage.local`)
 | Key | Value |
 |-----|-------|
-| `foundryUrl` | Base URL of Foundry instance (e.g. `https://dont-web-the-cleric.moltenhosting.com`) |
+| `actorCache` | `{ [characterId]: { actorId, actorName } }` — per-character actor link cache, written only after Foundry confirms |
+| `syncMeta` | `{ [characterId]: { lastSyncTime } }` — per-character UI metadata |
 | `characterId` | DDB character ID (from URL) |
 | `characterName` | Character name |
-| `foundryActorId` | Linked Foundry actor UUID |
-| `foundryActorName` | Linked actor name (for display) |
 | `ddbCharacterData` | Full DDB character JSON (cached) |
-| `ddbCharacterHP` | Pre-computed `{ current, max, temp }` from content.js — used by re-import |
-| `lastSyncTime` | Timestamp of last HP sync |
-| `lastSyncHP` | `{ current, max }` of last HP sync |
 | `importedMonsters` | Map of `{ monsterId: true }` for "already imported" UI state |
+
+**Removed keys** (no longer used): `foundryUrl`, `foundryActorId`, `foundryActorName`, `lastSyncHP`, `ddbCharacterHP`
 
 ### Button Injection (content.js)
 - Target: before `.ct-character-header-desktop__group--share`
@@ -145,10 +143,33 @@ All messages: `{ source: 'ddb-sync-extension', action, requestId, ...payload }`
 
 ## Setup
 
-1. **Foundry module**: Upload `ddb-sync/` folder to Molten File Manager → `Data/modules/ddb-sync/`. Enable in Foundry module manager.
-2. **Chrome extension**: `chrome://extensions` → Developer mode → Load unpacked → select `ddb-foundry-sync/` folder
-3. **Configure**: Open extension popup → ⚙ → enter `https://dont-web-the-cleric.moltenhosting.com` → Save
-4. Open a DDB character page — "⚒ FOUNDRY SYNC" button appears in the header
+### Foundry Module (GM — once per world)
+1. Foundry → **Add-on Modules → Install Module**
+2. Paste manifest URL: `https://raw.githubusercontent.com/KevS75/ddb-foundry-sync/main/ddb-sync/module.json`
+3. Click **Install**, then enable the module in your world
+
+### Chrome Extension (each player)
+1. Download `ddb-foundry-sync.zip` from the [latest release](https://github.com/KevS75/ddb-foundry-sync/releases/latest)
+2. Unzip anywhere on your machine
+3. Chrome → `chrome://extensions` → enable **Developer mode** → **Load unpacked** → select the unzipped folder
+4. Open a DDB character page — "⚒ FOUNDRY SYNC" appears in the character header
+
+No URL configuration needed — the extension auto-detects the open Foundry tab.
+
+---
+
+## Distribution
+
+- **Repository**: https://github.com/KevS75/ddb-foundry-sync
+- **Manifest URL** (Foundry install): `https://raw.githubusercontent.com/KevS75/ddb-foundry-sync/main/ddb-sync/module.json`
+- **Releases**: https://github.com/KevS75/ddb-foundry-sync/releases
+
+### Releasing a new version
+1. Bump `version` in both `ddb-sync/module.json` and `ddb-foundry-sync/manifest.json`
+2. Commit: `git commit -am "v0.x.x — description"`
+3. Tag and push: `git tag v0.x.x && git push && git push --tags`
+
+GitHub Actions automatically builds `ddb-sync.zip` (Foundry module) and `ddb-foundry-sync.zip` (Chrome extension) and attaches them to the release. Foundry will detect the new version via the manifest URL and prompt players to update.
 
 ---
 
@@ -168,12 +189,16 @@ Click re-import — look for `[DDB-Sync BG] Re-import data check` lines showing 
 
 ## Known Issues / Next Steps
 
-### Active Bug
-- **HP re-import gets wrong values** (`conMod=2 level=15` instead of correct values): DDB's `char.stats[]` are base-only; racial bonuses and ASIs live in `char.modifiers` (not yet processed). Current workaround: `ddbCharacterHP` stored by content.js on page load is used instead of recalculation — but this requires the DDB tab to have been loaded/refreshed before re-importing.
+See [BUGS-AND-TODO.md](BUGS-AND-TODO.md) for the full tracker. Summary:
+
+### Active Bugs
+- **BUG-004** (Open): JS error in `content.js` console.group logging block at lines 531/573. Low priority — logging only, core sync unaffected.
 
 ### Feature Gaps
+- Skills / skill proficiencies not yet synced (next up)
 - Spell slots not synced
 - Conditions/death saves not synced
 - Multi-character support (storage is single-character)
 - One-way sync only (DDB → Foundry)
-- Full `modifiers` processing for accurate ability score calculation
+- Full `modifiers` processing for accurate ability score calculation (workaround: DOM values used instead)
+- TODO-001 (Parked): Granular sync toggles (e.g. skip token on re-import) — likely in Foundry module settings

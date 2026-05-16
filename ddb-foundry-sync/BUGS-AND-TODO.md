@@ -81,6 +81,32 @@ Auto-detect Foundry by pinging all open tabs via the ddb-sync module. No URL con
 
 ---
 
+### BUG-007 · Players cannot move their tokens in combat after character import
+**Status:** Open  
+**Reported by:** Paul and Kev  
+**Symptom:** After importing their characters via the extension, Paul and Kev can see their tokens on the map but cannot move them during combat. Other import functionality works fine.  
+**Suspected causes (to investigate):**
+- Actor ownership not set — imported actors may be created with GM-only ownership, leaving player users with no Owner permission on their own actor. Foundry requires "Owner" level permission on an actor for the player to control its token.
+- Token disposition or `actorLink` flag — if the token is not linked to the actor, or is set up as a wildcard token, permission inheritance may break.
+- `createActor` in `ddb-sync.js` may not be setting `ownership` correctly — check whether the player's Foundry user ID is being passed and applied during actor creation.  
+**Fix direction:** When creating (or re-importing) an actor, the import flow should set `ownership: { [foundryUserId]: 3 }` (3 = Owner) for the player who owns that character. May need to pass the player's Foundry user ID as part of the import payload, or have the Foundry module look up the current user and assign ownership automatically.  
+**Files to check:** `ddb-sync/ddb-sync.js` (`createActor` / `updateActor` handlers), `ddb-foundry-sync/background.js` (import payload construction)
+
+---
+
+### BUG-006 · "No character data available" error when player tries to link character
+**Status:** Likely fixed by TODO-006 (v0.4.0) — needs confirmation from Pezz  
+**Reported by:** Pezz (Toledo Jailbreaker)  
+**Symptom:** When Pezz opened the extension popup on his DDB character sheet and attempted to link his character to Foundry, he got an error saying "no character data available" — even though the character sheet was fully loaded and it was definitely his character.  
+**Suspected causes (to investigate):**
+- `ddbCharacterData` not yet populated in `content.js` by the time the popup queries it — could be a race condition where the popup opens before the page's character data is fetched/parsed
+- The character page URL didn't match the expected DDB character URL pattern, so `content.js` didn't inject or run
+- `characterId` was missing or undefined when the popup tried to initiate the link flow  
+**Reproduction:** Have Pezz open his DDB sheet, click the extension, try to link — note exact timing and whether the page was freshly loaded vs navigated to.  
+**Files to check:** `ddb-foundry-sync/content.js` (character data fetch + message handler), `ddb-foundry-sync/popup.js` (link flow initiation)
+
+---
+
 ### BUG-004 · JS error in content.js around character data logging
 **Status:** Open  
 **Symptom:** Stack trace error thrown at content.js:531 and content.js:573, both anonymous functions inside the main async IIFE. Error appears in the character data `console.group` logging block after `fetchCharacterData`.  
@@ -91,6 +117,15 @@ Auto-detect Foundry by pinging all open tabs via the ddb-sync module. No URL con
 ---
 
 ## 📋 To-Do / Enhancements
+
+### TODO-006 · Fetch character JSON on demand at click time instead of caching on page load
+**Status:** ✅ Done — v0.4.0  
+**Resolution:** Service-worker `fetch` with `credentials: 'include'` confirmed (May 2026 console test) to send DDB session cookies and return the full character JSON (~286 KB, flat shape — no `.data` wrapper). `fetchFreshCharacterData` rewritten to fetch directly without tab injection. `CREATE_FOUNDRY_ACTOR` and `REIMPORT_CHARACTER` now fetch fresh at click time and no longer read `ddbCharacterData` from `chrome.storage.local`.  
+**Likely also fixed:** BUG-006 (Pezz "no character data available" — race condition on page load is no longer reachable for the import flow). Needs confirmation in play.  
+**Follow-up cleanup (separate pass):** `content.js` still writes `ddbCharacterData` to storage on page load — now dead weight for imports, can be pruned once Branch A is proven in real play.  
+**Files changed:** `ddb-foundry-sync/background.js` (`fetchFreshCharacterData`, `CREATE_FOUNDRY_ACTOR`, `REIMPORT_CHARACTER`), `ddb-foundry-sync/manifest.json` (0.3.0 → 0.4.0)
+
+---
 
 ### TODO-002 · Monster importer — portrait download & local upload
 **Status:** ✅ Done — v0.3.0  

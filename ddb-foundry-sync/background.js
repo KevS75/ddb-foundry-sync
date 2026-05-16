@@ -11,7 +11,9 @@
 //   syncMeta    : { [characterId]: { lastSyncTime } }
 //   characterId : currently-viewed DDB character (set on page load)
 //   characterName: name of currently-viewed character
-//   ddbCharacterData: full cached DDB JSON for current character
+//   ddbCharacterData: legacy — still written by content.js but no longer
+//                     read by the import flow (CREATE_FOUNDRY_ACTOR /
+//                     REIMPORT_CHARACTER fetch fresh at click time as of v0.4.0)
 //   importedMonsters: set of imported monster IDs
 // ============================================================
 
@@ -216,37 +218,83 @@ async function uploadPortraitToFoundry(portraitDataUrl, characterName) {
 }
 
 // ----------------------------------------------------------
-// Fetch fresh character JSON by injecting into the open DDB tab
+// Fetch fresh character JSON directly from the service worker.
+// Host permissions on dndbeyond.com let DDB session cookies flow
+// with credentials:'include' — no tab injection needed.
+// (Confirmed via service-worker console test, May 2026.)
+//
+// Returns { data, reason }:
+//   - on success: { data: <character JSON>, reason: null }
+//   - on failure: { data: null, reason: <user-facing message> }
+//
+// Failure modes observed in the wild:
+//   - 404: DDB has no exportable JSON for this character. Not always
+//     propagation lag — older characters can 404 while newer ones
+//     work, so we don't assume "wait and retry" will help.
+//   - 500: DDB threw an unhandled exception serializing the character
+//     (e.g. character "Null"). Usually a corrupted item/class option.
+//   - 401/403: session cookies didn't flow or aren't valid.
 // ----------------------------------------------------------
 async function fetchFreshCharacterData(characterId) {
-  const tabs = await chrome.tabs.query({ url: `*://www.dndbeyond.com/characters/${characterId}*` });
-  if (!tabs[0]) {
-    console.log(`${PREFIX} DDB character tab not open — will use cached data`);
-    return null;
-  }
+  let resp;
   try {
-    const [result] = await chrome.scripting.executeScript({
-      target: { tabId: tabs[0].id },
-      world:  'MAIN',
-      func:   async (charId) => {
-        try {
-          const resp = await fetch(
-            `https://www.dndbeyond.com/character/${charId}/json`,
-            { credentials: 'include' }
-          );
-          return resp.ok ? resp.json() : null;
-        } catch { return null; }
-      },
-      args: [String(characterId)]
-    });
-    if (result?.result) {
-      console.log(`${PREFIX} ✅ Fresh character JSON fetched from DDB tab`);
-      return result.result;
-    }
+    resp = await fetch(
+      `https://www.dndbeyond.com/character/${characterId}/json`,
+      { credentials: 'include' }
+    );
   } catch (err) {
-    console.warn(`${PREFIX} Fresh fetch failed: ${err.message}`);
+    console.warn(`${PREFIX} Fresh fetch network error: ${err.message}`);
+    return { data: null, reason: `Network error fetching character JSON: ${err.message}` };
   }
-  return null;
+
+  if (resp.status === 404) {
+    console.warn(`${PREFIX} Fresh fetch 404 for character ${characterId}`);
+    return {
+      data: null,
+      reason: 'DDB has no exportable JSON for this character (404). Try opening the character sheet in DDB and making a small change (e.g. equip/unequip an item) to force a re-export, then try again. Some characters persistently 404 — let Kev know if this one does.'
+    };
+  }
+  if (resp.status === 500) {
+    console.warn(`${PREFIX} Fresh fetch 500 for character ${characterId}`);
+    return {
+      data: null,
+      reason: 'DDB couldn\'t export this character (500 server error) — its data is likely corrupted. Try removing recently-added items or homebrew content, duplicating the character, or contacting DDB support.'
+    };
+  }
+  if (resp.status === 401 || resp.status === 403) {
+    console.warn(`${PREFIX} Fresh fetch ${resp.status} for character ${characterId}`);
+    return {
+      data: null,
+      reason: 'DDB rejected the request (auth) — make sure you\'re logged in to DDB in this browser.'
+    };
+  }
+  if (!resp.ok) {
+    console.warn(`${PREFIX} Fresh fetch HTTP ${resp.status} for character ${characterId}`);
+    return {
+      data: null,
+      reason: `DDB returned HTTP ${resp.status} when fetching character JSON.`
+    };
+  }
+
+  let json;
+  try {
+    json = await resp.json();
+  } catch (err) {
+    console.warn(`${PREFIX} Fresh fetch JSON parse error: ${err.message}`);
+    return { data: null, reason: 'DDB returned a response that wasn\'t valid JSON.' };
+  }
+  // Endpoint returns the character object flat (no .data wrapper).
+  // mapDDBToFoundryActor handles both shapes via `ddbData.data ?? ddbData`.
+  const name = json?.name ?? json?.data?.name;
+  if (!name) {
+    console.warn(`${PREFIX} Fresh fetch returned 200 but no character data`);
+    return {
+      data: null,
+      reason: 'DDB returned an empty response — are you logged in to DDB?'
+    };
+  }
+  console.log(`${PREFIX} ✅ Fresh character JSON fetched (${name})`);
+  return { data: json, reason: null };
 }
 
 // ----------------------------------------------------------
@@ -532,17 +580,31 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   // ---- One-click actor creation ----
+  // Fetches character JSON fresh at click time — no reliance on chrome.storage cache.
   if (message.type === 'CREATE_FOUNDRY_ACTOR') {
-    chrome.storage.local.get(['characterId', 'ddbCharacterData']).then(async (s) => {
-      if (!s.ddbCharacterData) {
-        sendResponse({ ok: false, reason: 'No character data cached — reload the DDB tab first.' });
+    (async () => {
+      const { characterId } = await chrome.storage.local.get('characterId');
+      if (!characterId) {
+        sendResponse({ ok: false, reason: 'No character ID — open a DDB character sheet first.' });
         return;
       }
       try {
         await sendToFoundry('ping');
 
-        const domStats = await readStatsFromDDBTab(s.characterId);
-        const actorData = mapDDBToFoundryActor(s.ddbCharacterData, s.characterId, domStats?.hp ?? null, domStats?.ac ?? null, domStats?.abilities ?? null, domStats?.saves ?? null, domStats?.initiative ?? null, domStats?.movement ?? null);
+        const fetchResult = await fetchFreshCharacterData(characterId);
+        if (!fetchResult.data) {
+          sendResponse({ ok: false, reason: fetchResult.reason });
+          return;
+        }
+        const characterData = fetchResult.data;
+
+        const domStats = await readStatsFromDDBTab(characterId);
+        const actorData = mapDDBToFoundryActor(
+          characterData, characterId,
+          domStats?.hp ?? null, domStats?.ac ?? null,
+          domStats?.abilities ?? null, domStats?.saves ?? null,
+          domStats?.initiative ?? null, domStats?.movement ?? null
+        );
         console.log(`${PREFIX} Creating actor: ${actorData.name}`);
 
         if (actorData.img?.startsWith('http')) {
@@ -555,7 +617,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
 
         const created = await sendToFoundry('createActor', { actorData });
-        await setCachedActor(s.characterId, created.uuid, created.name);
+        await setCachedActor(characterId, created.uuid, created.name);
 
         console.log(`${PREFIX} ✅ Actor created: ${created.name} (${created.uuid})`);
         sendResponse({ ok: true, actorId: created.uuid, actorName: created.name });
@@ -564,7 +626,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         console.error(`${PREFIX} Actor creation failed:`, err.message);
         sendResponse({ ok: false, reason: err.message });
       }
-    });
+    })();
     return true;
   }
 
@@ -616,14 +678,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   // ---- Character re-import (overwrites linked actor) ----
+  // Fetches character JSON fresh at click time — no reliance on chrome.storage cache.
   if (message.type === 'REIMPORT_CHARACTER') {
-    chrome.storage.local.get(['characterId', 'ddbCharacterData']).then(async (s) => {
-      if (!s.ddbCharacterData) {
-        sendResponse({ ok: false, reason: 'No character data cached — reload the DDB character tab first.' });
+    (async () => {
+      const { characterId } = await chrome.storage.local.get('characterId');
+      if (!characterId) {
+        sendResponse({ ok: false, reason: 'No character ID — open a DDB character sheet first.' });
         return;
       }
 
-      const cached = await getCachedActor(s.characterId);
+      const cached = await getCachedActor(characterId);
       if (!cached) {
         sendResponse({ ok: false, reason: 'No linked actor — create one first.' });
         return;
@@ -632,9 +696,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       try {
         await sendToFoundry('ping');
 
-        const freshData = await fetchFreshCharacterData(s.characterId);
-        const characterData = freshData ?? s.ddbCharacterData;
-        if (freshData) chrome.storage.local.set({ ddbCharacterData: freshData });
+        const fetchResult = await fetchFreshCharacterData(characterId);
+        if (!fetchResult.data) {
+          sendResponse({ ok: false, reason: fetchResult.reason });
+          return;
+        }
+        const characterData = fetchResult.data;
 
         // HP, AC, and abilities: use DOM values sent by content.js (panel trigger).
         // Fall back to injecting into DDB tab only if triggered from the popup.
@@ -645,7 +712,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         let initiative = message.initiative ?? null;
         let movement   = message.movement   ?? null; // optional
         if (!hp || ac === null || !abilities || !saves || initiative === null) {
-          const domStats = await readStatsFromDDBTab(s.characterId);
+          const domStats = await readStatsFromDDBTab(characterId);
           hp         = hp         ?? domStats?.hp         ?? null;
           ac         = ac         ?? domStats?.ac         ?? null;
           abilities  = abilities  ?? domStats?.abilities  ?? null;
@@ -653,7 +720,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           initiative = initiative ?? domStats?.initiative ?? null;
           movement   = movement   ?? domStats?.movement   ?? null;
         }
-        const actorData = mapDDBToFoundryActor(characterData, s.characterId, hp, ac, abilities, saves, initiative, movement);
+        const actorData = mapDDBToFoundryActor(characterData, characterId, hp, ac, abilities, saves, initiative, movement);
 
         if (actorData.img?.startsWith('http')) {
           const dataUrl   = await fetchPortraitAsDataUrl(actorData.img);
@@ -671,7 +738,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         console.error(`${PREFIX} Re-import failed:`, err.message);
         sendResponse({ ok: false, reason: err.message });
       }
-    });
+    })();
     return true;
   }
 
