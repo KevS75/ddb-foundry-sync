@@ -46,7 +46,7 @@ Data is used exclusively to keep your Foundry VTT actors up to date with your D&
 
 The full source code for this extension and its companion Foundry module is publicly available on GitHub. You can review exactly what the extension does at any time.
 
-**GitHub:** [https://github.com/YOUR_GITHUB_URL_HERE](https://github.com/YOUR_GITHUB_URL_HERE)
+**GitHub:** [https://github.com/KevS75/ddb-foundry-sync](https://github.com/KevS75/ddb-foundry-sync)
 
 ---
 
